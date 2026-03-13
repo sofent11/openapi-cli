@@ -16,11 +16,13 @@ jobs:
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+          if gh release view "${GITHUB_REF_NAME}" --repo "${GH_REPO}" >/dev/null 2>&1; then
             echo "Release ${GITHUB_REF_NAME} already exists"
           else
             gh release create "${GITHUB_REF_NAME}" \
+              --repo "${GH_REPO}" \
               --title "${GITHUB_REF_NAME}" \
               --generate-notes
           fi
@@ -86,9 +88,10 @@ jobs:
       - name: Upload archive to release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         shell: bash
         run: |
           set -euo pipefail
           archive_base="openapi-cli_${GITHUB_REF_NAME#v}_${{ matrix.goos }}_${{ matrix.goarch }}"
           archive_path="dist/${archive_base}.${{ matrix.ext }}"
-          gh release upload "${GITHUB_REF_NAME}" "${archive_path}" --clobber
+          gh release upload "${GITHUB_REF_NAME}" "${archive_path}" --repo "${GH_REPO}" --clobber
