@@ -1,0 +1,61 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "ERP API",
+    "version": "1.0.0"
+  },
+  "host": "example.com",
+  "basePath": "/api",
+  "schemes": ["https"],
+  "paths": {
+    "/users": {
+      "post": {
+        "tags": ["users"],
+        "summary": "Create user",
+        "description": "Create a new user.",
+        "operationId": "createUser",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created"
+          }
+        }
+      }
+    },
+    "/users/{id}": {
+      "get": {
+        "tags": ["users"],
+        "summary": "Lookup user",
+        "description": "Lookup a user by ID.",
+        "operationId": "lookupUser",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    }
+  }
+}

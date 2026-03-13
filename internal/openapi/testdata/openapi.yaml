@@ -1,0 +1,40 @@
+openapi: 3.0.3
+info:
+  title: ERP API
+  version: 1.0.0
+paths:
+  /users:
+    post:
+      tags:
+        - users
+      summary: Create user
+      description: Create a new user.
+      operationId: createUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      responses:
+        "201":
+          description: Created
+  /users/{id}:
+    get:
+      tags:
+        - users
+      summary: Lookup user
+      description: Lookup a user by ID.
+      operationId: lookupUser
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
