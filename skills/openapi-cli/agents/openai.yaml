@@ -1,0 +1,4 @@
+interface:
+  display_name: "OpenAPI CLI"
+  short_description: "Use local API specs as a searchable terminal CLI"
+  default_prompt: "Use $openapi-cli to import an OpenAPI or Swagger spec, find an endpoint, inspect its docs, and prepare or run a request."
