@@ -1,16 +1,109 @@
 # openapi-cli
 
-`openapi-cli` 是一个本地命令行工具，用来读取 Swagger 2.0 / OpenAPI 3.x 文档，完成以下工作：
+一个面向 Swagger 2.0 / OpenAPI 3.x 的命令行工具，用来把本地接口文档变成一个可搜索、可查看、可调用的 CLI。
 
-- 查看本地项目列表
-- 查看项目分类
-- 搜索接口
+它适合这类场景：
+
+- 你手上有一份 `swagger.json` / `openapi.yaml`
+- 你想在终端里快速搜索接口，不想每次打开 Swagger UI
+- 你想直接根据文档调用接口
+- 你想把多个项目的 API 文档统一管理在一个本地目录里
+
+核心能力：
+
+- 管理多个 API 项目
+- 自动识别 Swagger 2.0 / OpenAPI 3.x
+- 查看项目分类和接口列表
+- 全局或项目内搜索接口
 - 输出接口文档
-- 调用接口
-- 管理项目配置
-- 从本地文件或远程 URL 导入并同步接口文档
+- 直接调用接口
+- 从本地文件或远程 URL 导入文档
+- 从 `updateUrl` 同步最新 `api.json`
+- 支持将请求打印成 `curl`
+- 支持路径参数占位符：
+  - `/users/{id}`
+  - `/user-order/get/:orderId`
 
 本文档覆盖目录结构、安装、全部命令、参数说明、示例和常见问题。
+
+## 快速开始
+
+### 1. 构建
+
+```bash
+go build -o openapi-cli .
+```
+
+### 2. 导入一个项目
+
+本地文件：
+
+```bash
+./openapi-cli config create -p erp ./openapi.yaml \
+  --base-url https://api.example.com
+```
+
+远程 URL：
+
+```bash
+./openapi-cli config create -p erp https://example.com/openapi.json \
+  --base-url https://api.example.com \
+  --auth-header Authorization \
+  --auth-token 'Bearer xxx'
+```
+
+### 3. 搜索接口
+
+```bash
+./openapi-cli search -p erp -i user
+```
+
+### 4. 查看接口文档
+
+```bash
+./openapi-cli doc -p erp -i /biz/user-order/page
+```
+
+### 5. 调用接口
+
+```bash
+./openapi-cli call -p erp -i /biz/user-order/page -q '{"pageNum":"1","pageSize":"20"}' -v
+```
+
+## Release 下载
+
+仓库提供 GitHub Releases 构建产物，发布后可直接下载常见平台二进制包。
+
+计划产物：
+
+- Linux `amd64`
+- Linux `arm64`
+- macOS `amd64`
+- macOS `arm64`
+- Windows `amd64`
+- Windows `arm64`
+
+打包格式：
+
+- Linux / macOS: `tar.gz`
+- Windows: `zip`
+
+如果你要发布一个版本，只需要推送一个 tag：
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+GitHub Actions 会自动：
+
+- 创建 Release
+- 交叉编译常见平台二进制
+- 将压缩包上传到该 Release
+
+工作流文件见：
+
+- [.github/workflows/release.yml](/Users/sofent/work/openapi-cli/.github/workflows/release.yml)
 
 ## 1. 安装与运行
 

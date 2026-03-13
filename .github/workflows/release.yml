@@ -1,0 +1,94 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "Release ${GITHUB_REF_NAME} already exists"
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --title "${GITHUB_REF_NAME}" \
+              --generate-notes
+          fi
+
+  build:
+    needs: create-release
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            ext: tar.gz
+          - goos: linux
+            goarch: arm64
+            ext: tar.gz
+          - goos: darwin
+            goarch: amd64
+            ext: tar.gz
+          - goos: darwin
+            goarch: arm64
+            ext: tar.gz
+          - goos: windows
+            goarch: amd64
+            ext: zip
+          - goos: windows
+            goarch: arm64
+            ext: zip
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+
+          binary_name="openapi"
+          if [[ "${{ matrix.goos }}" == "windows" ]]; then
+            binary_name="${binary_name}.exe"
+          fi
+
+          archive_base="openapi-cli_${GITHUB_REF_NAME#v}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          binary_path="dist/${binary_name}"
+
+          GOOS="${{ matrix.goos }}" GOARCH="${{ matrix.goarch }}" CGO_ENABLED=0 \
+            go build -trimpath -ldflags="-s -w" -o "${binary_path}" .
+
+          if [[ "${{ matrix.ext }}" == "zip" ]]; then
+            (
+              cd dist
+              zip -q "${archive_base}.zip" "${binary_name}"
+            )
+          else
+            tar -C dist -czf "dist/${archive_base}.tar.gz" "${binary_name}"
+          fi
+
+      - name: Upload archive to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive_base="openapi-cli_${GITHUB_REF_NAME#v}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          archive_path="dist/${archive_base}.${{ matrix.ext }}"
+          gh release upload "${GITHUB_REF_NAME}" "${archive_path}" --clobber
