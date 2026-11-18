@@ -3,10 +3,12 @@ package openapi
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,13 +34,29 @@ func CallOperation(project *Project, op *Operation, opts CallOptions) (*CallResu
 	if err != nil {
 		return nil, err
 	}
-	client := opts.Client
+	return SendRequest(req, opts.Client, project.Config.AuthHeader)
+}
+
+func SendRequest(req *http.Request, client *http.Client, authHeader string) (*CallResult, error) {
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		client = &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(next *http.Request, via []*http.Request) error {
+			authenticated := authHeader != "" && req.Header.Get(authHeader) != ""
+			if authenticated && (next.URL.Scheme != req.URL.Scheme || next.URL.Host != req.URL.Host) {
+				return http.ErrUseLastResponse
+			}
+			if len(via) >= 10 {
+				return errors.New("too many redirects")
+			}
+			return nil
+		}}
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("call interface: %s; check baseUrl, network reachability, and auth settings", err)
+		var netErr *url.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			return nil, errors.New("call interface: request timed out")
+		}
+		return nil, errors.New("call interface: request failed; check baseUrl, network reachability, and auth settings")
 	}
 	defer resp.Body.Close()
 
@@ -70,7 +88,7 @@ func BuildRequest(project *Project, op *Operation, opts CallOptions) (*http.Requ
 	baseURL := strings.TrimRight(project.Config.BaseURL, "/")
 	reqURL, err := url.Parse(baseURL + path)
 	if err != nil {
-		return nil, fmt.Errorf("build request url: %w", err)
+		return nil, errors.New("build request url: invalid base URL or path")
 	}
 	reqURL.RawQuery = queryValues.Encode()
 
@@ -85,13 +103,20 @@ func BuildRequest(project *Project, op *Operation, opts CallOptions) (*http.Requ
 
 	req, err := http.NewRequest(strings.ToUpper(op.Method), reqURL.String(), bodyReader)
 	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
+		return nil, errors.New("create request: invalid method or URL")
 	}
 	if bodyReader != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if project.Config.AuthHeader != "" && project.Config.AuthToken != "" {
-		req.Header.Set(project.Config.AuthHeader, project.Config.AuthToken)
+	token := project.Config.AuthToken
+	if name := project.Config.AuthTokenEnv; name != "" {
+		token = os.Getenv(name)
+		if token == "" || project.Config.AuthHeader == "" {
+			return nil, errors.New("credential environment variable is empty or authHeader is missing")
+		}
+	}
+	if project.Config.AuthHeader != "" && token != "" {
+		req.Header.Set(project.Config.AuthHeader, token)
 	}
 	return req, nil
 }
@@ -202,7 +227,7 @@ func ResponseHint(project *Project, op *Operation, result *CallResult) string {
 	case http.StatusBadRequest:
 		return fmt.Sprintf("请求参数不符合接口要求。请先运行 `openapi doc -p %s -i %s` 检查必填 query/path/body 参数，再核对 -q 和 -d 的 JSON 结构。", project.Name, op.Path)
 	case http.StatusUnauthorized:
-		return fmt.Sprintf("认证失败。请检查项目配置里的 authHeader/authToken，或先运行 `openapi config -p %s` 查看当前配置；如果需要，可先用 `openapi call -p %s -i %s -v` 查看实际发送的请求头。", project.Name, project.Name, op.Path)
+		return fmt.Sprintf("认证失败。请检查项目 %s 的 authHeader/authToken 或凭证环境变量。", project.Name)
 	case http.StatusForbidden:
 		return fmt.Sprintf("当前凭证没有权限访问这个接口。请检查 authToken 是否正确、账号是否具备权限，或联系接口提供方确认 `%s %s` 的访问权限。", strings.ToUpper(op.Method), op.Path)
 	case http.StatusNotFound:
@@ -223,10 +248,11 @@ func ResponseHint(project *Project, op *Operation, result *CallResult) string {
 	}
 }
 
-func RenderCurlCommand(req *http.Request) string {
+func RenderCurlCommand(req *http.Request, authHeader ...string) string {
 	if req == nil {
 		return ""
 	}
+	mask := newMask(req, authHeader...)
 	parts := []string{"curl"}
 	parts = append(parts, "-X", shellQuote(req.Method))
 
@@ -237,7 +263,7 @@ func RenderCurlCommand(req *http.Request) string {
 	sort.Strings(headerKeys)
 	for _, key := range headerKeys {
 		for _, value := range req.Header.Values(key) {
-			parts = append(parts, "-H", shellQuote(fmt.Sprintf("%s: %s", key, value)))
+			parts = append(parts, "-H", shellQuote(fmt.Sprintf("%s: %s", key, mask.field(key, value))))
 		}
 	}
 
@@ -247,15 +273,15 @@ func RenderCurlCommand(req *http.Request) string {
 			data, readErr := io.ReadAll(body)
 			_ = body.Close()
 			if readErr == nil && len(data) > 0 {
-				parts = append(parts, "--data-raw", shellQuote(string(data)))
+				parts = append(parts, "--data-raw", shellQuote(string(mask.body(data))))
 			}
 		}
 	}
 
-	parts = append(parts, shellQuote(req.URL.String()))
+	parts = append(parts, shellQuote(mask.url(req.URL)))
 	return strings.Join(parts, " ")
 }
 
 func shellQuote(value string) string {
-	return strconv.Quote(value)
+	return strings.NewReplacer("$", "\\$", "`", "\\`").Replace(strconv.Quote(value))
 }

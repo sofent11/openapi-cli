@@ -222,7 +222,7 @@ func TestBuildRequestAndRenderCurlCommand(t *testing.T) {
 	if !strings.Contains(curl, `curl -X "POST"`) {
 		t.Fatalf("unexpected curl method: %s", curl)
 	}
-	if !strings.Contains(curl, `-H "Authorization: Bearer demo"`) {
+	if !strings.Contains(curl, `-H "Authorization: [REDACTED]"`) {
 		t.Fatalf("unexpected curl auth header: %s", curl)
 	}
 	if !strings.Contains(curl, `-H "Content-Type: application/json"`) {

@@ -26,7 +26,7 @@ openapi-cli config create -p erp ./openapi.yaml --base-url https://api.example.c
 openapi-cli config create -p erp https://example.com/openapi.json \
   --base-url https://api.example.com \
   --auth-header Authorization \
-  --auth-token 'Bearer xxx'
+  --auth-token-env ERP_AUTH_VALUE
 ```
 
 Use `config sync -p <project>` only when the project already has `updateUrl`.
@@ -69,11 +69,11 @@ Use `-m` when one path has multiple methods. Prefer `-t markdown` unless the use
 Use `call` only after confirming the project config and the request shape.
 
 ```bash
-openapi-cli call -p erp -i /users/{id} -m GET -q '{"id":"1"}' -v
-openapi-cli call -p erp -i /users -m POST -d '{"name":"alice"}' -v
+openapi-cli call -p erp -i /users/{id} -m GET -q '{"id":"1"}' --dry-run
+openapi-cli call -p erp -i /users -m POST -d '{"name":"alice"}' --dry-run
 ```
 
-Use `-q` for query-string JSON objects and `-d` for JSON request bodies. Prefer `-v` first so the user can inspect the generated `curl` before relying on the result.
+Use `-q` for query-string JSON objects and `-d` for JSON request bodies. Use `--dry-run` for a redacted preview with zero requests. Use `--output json --fail-with-body` for execution.
 
 ## Method And Parameter Rules
 
@@ -81,7 +81,7 @@ Use `-q` for query-string JSON objects and `-d` for JSON request bodies. Prefer 
 - Add `-m` immediately if the CLI reports multiple methods for the same path.
 - Put path placeholder values such as `/users/{id}` into the JSON passed with `-q` unless the CLI already documents a different pattern for that endpoint.
 - Ensure `baseUrl` is present before `call`.
-- Ensure both `authHeader` and `authToken` are present when the API requires authentication.
+- Ensure both `authHeader` and a runtime credential via `authTokenEnv` are present when the API requires authentication.
 
 ## Config Management
 
@@ -92,7 +92,7 @@ openapi-cli config -p erp
 openapi-cli config get -p erp baseUrl
 openapi-cli config set -p erp baseUrl https://api.example.com
 openapi-cli config set -p erp authHeader Authorization
-openapi-cli config set -p erp authToken 'Bearer xxx'
+openapi-cli config set -p erp authTokenEnv ERP_AUTH_VALUE
 ```
 
 If the user reports stale docs, check `updateUrl` and then run `config sync`.
@@ -102,5 +102,5 @@ If the user reports stale docs, check `updateUrl` and then run `config sync`.
 - Prefer concrete commands over abstract explanations.
 - If the user gives an inexact endpoint name, search first instead of guessing.
 - If the user wants to understand an endpoint, use `doc` before `call`.
-- If a call may have side effects, show the `-v` form first.
+- If a call may have side effects, use `--dry-run` for a preview.
 - If the task needs exact flags, sample commands, or error-specific recovery, read [references/command-recipes.md](./references/command-recipes.md).

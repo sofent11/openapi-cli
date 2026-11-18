@@ -187,7 +187,8 @@ func newCallCommand() *cobra.Command {
 	var method string
 	var query string
 	var body string
-	var verbose bool
+	var verbose, dryRun, fail bool
+	var output string
 	cmd := &cobra.Command{
 		Use:   "call",
 		Short: "Call an interface and print the response",
@@ -197,7 +198,16 @@ openapi call -p erp -i /users/{id} -m GET -q '{"id":"1"}'
 openapi call -p erp -i /users -m POST -d '{"name":"alice"}'
 openapi call -p erp -i /users -m POST -d '{"name":"alice"}' -v
 `),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) (retErr error) {
+			kind := "input"
+			if output != "text" && output != "json" {
+				return fmt.Errorf("unsupported output format")
+			}
+			defer func() {
+				if retErr != nil && output == "json" && kind != "" {
+					_ = json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"ok": false, "error": map[string]string{"kind": kind, "message": retErr.Error()}})
+				}
+			}()
 			loaded, err := api.LoadProject(project)
 			if err != nil {
 				return err
@@ -210,34 +220,67 @@ openapi call -p erp -i /users -m POST -d '{"name":"alice"}' -v
 				QueryJSON: query,
 				BodyJSON:  body,
 			}
-			if verbose {
-				req, err := api.BuildRequest(loaded, op, opts)
-				if err != nil {
-					return err
-				}
-				fmt.Fprintln(cmd.OutOrStdout(), "Request:")
-				fmt.Fprintln(cmd.OutOrStdout(), api.RenderCurlCommand(req))
-				fmt.Fprintln(cmd.OutOrStdout())
-			}
-			result, err := api.CallOperation(loaded, op, opts)
+			req, err := api.BuildRequest(loaded, op, opts)
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Status: %s\n", result.Status)
-			if hint := api.ResponseHint(loaded, op, result); hint != "" {
-				fmt.Fprintf(cmd.OutOrStdout(), "Hint: %s\n", hint)
+			if dryRun || verbose {
+				preview := api.RenderCurlCommand(req, loaded.Config.AuthHeader)
+				if dryRun {
+					if output == "json" {
+						return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]any{"dryRun": true, "ok": true, "request": preview})
+					}
+					fmt.Fprintln(cmd.OutOrStdout(), preview)
+					return nil
+				}
+				previewOut := cmd.OutOrStdout()
+				if output == "json" {
+					previewOut = cmd.ErrOrStderr()
+				}
+				fmt.Fprintln(previewOut, "Request:", preview)
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), "Headers:")
-			headerKeys := make([]string, 0, len(result.Headers))
-			for key := range result.Headers {
-				headerKeys = append(headerKeys, key)
+			kind = "transport"
+			result, err := api.SendRequest(req, opts.Client, loaded.Config.AuthHeader)
+			if err != nil {
+				return err
 			}
-			sort.Strings(headerKeys)
-			for _, key := range headerKeys {
-				fmt.Fprintf(cmd.OutOrStdout(), "- %s: %s\n", key, strings.Join(result.Headers[key], ", "))
+			api.RedactResult(result, req, loaded.Config.AuthHeader)
+			ok := result.StatusCode >= 200 && result.StatusCode < 300
+			if output == "json" {
+				var body any
+				if json.Valid(result.Body) {
+					body = json.RawMessage(result.Body)
+				} else if len(result.Body) > 0 {
+					body = string(result.Body)
+				}
+				envelope := map[string]any{"ok": ok, "status": result.StatusCode, "headers": result.Headers, "body": body}
+				if !ok {
+					envelope["error"] = map[string]string{"kind": "http", "message": result.Status}
+				}
+				if err := json.NewEncoder(cmd.OutOrStdout()).Encode(envelope); err != nil {
+					return err
+				}
+			} else {
+				fmt.Fprintf(cmd.OutOrStdout(), "Status: %s\n", result.Status)
+				if hint := api.ResponseHint(loaded, op, result); hint != "" {
+					fmt.Fprintf(cmd.OutOrStdout(), "Hint: %s\n", hint)
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), "Headers:")
+				headerKeys := make([]string, 0, len(result.Headers))
+				for key := range result.Headers {
+					headerKeys = append(headerKeys, key)
+				}
+				sort.Strings(headerKeys)
+				for _, key := range headerKeys {
+					fmt.Fprintf(cmd.OutOrStdout(), "- %s: %s\n", key, strings.Join(result.Headers[key], ", "))
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), "\nBody:")
+				fmt.Fprintln(cmd.OutOrStdout(), api.FormatResponseBody(result.Body))
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), "\nBody:")
-			fmt.Fprintln(cmd.OutOrStdout(), api.FormatResponseBody(result.Body))
+			if fail && !ok {
+				kind = ""
+				return fmt.Errorf("HTTP status %d", result.StatusCode)
+			}
 			return nil
 		},
 	}
@@ -247,6 +290,9 @@ openapi call -p erp -i /users -m POST -d '{"name":"alice"}' -v
 	cmd.Flags().StringVarP(&query, "query", "q", "", "Query JSON object")
 	cmd.Flags().StringVarP(&body, "data", "d", "", "Request body JSON object")
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Print the request as a curl command before calling")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print a redacted preview without sending a request")
+	cmd.Flags().StringVar(&output, "output", "text", "Output format: text or json")
+	cmd.Flags().BoolVar(&fail, "fail-with-body", false, "Exit nonzero on non-2xx responses, retaining the response body")
 	mustMarkRequired(cmd, "project")
 	mustMarkRequired(cmd, "interface")
 	return cmd
@@ -269,6 +315,7 @@ openapi config sync -p erp
 			if err != nil {
 				return err
 			}
+			cfg = api.DisplayConfig(cfg)
 			data, err := json.MarshalIndent(cfg, "", "  ")
 			if err != nil {
 				return err
@@ -289,7 +336,7 @@ openapi config sync -p erp
 
 func newConfigGetCommand(project *string) *cobra.Command {
 	return &cobra.Command{
-		Use:   "get <baseUrl|authHeader|authToken|updateUrl>",
+		Use:   "get <baseUrl|authHeader|authToken|authTokenEnv|updateUrl>",
 		Short: "Get a single config value",
 		Long:  "Read one field from setting.json for a project.",
 		Example: strings.TrimSpace(`
@@ -302,7 +349,7 @@ openapi config get -p erp updateUrl
 			if err != nil {
 				return err
 			}
-			value, err := readConfigValue(cfg, args[0])
+			value, err := readConfigValue(api.DisplayConfig(cfg), args[0])
 			if err != nil {
 				return err
 			}
@@ -314,7 +361,7 @@ openapi config get -p erp updateUrl
 
 func newConfigSetCommand(project *string) *cobra.Command {
 	return &cobra.Command{
-		Use:   "set <baseUrl|authHeader|authToken|updateUrl> <value>",
+		Use:   "set <baseUrl|authHeader|authToken|authTokenEnv|updateUrl> <value>",
 		Short: "Set a project config value",
 		Long:  "Update one supported field in setting.json for a project.",
 		Example: strings.TrimSpace(`
@@ -345,7 +392,7 @@ func newConfigCreateCommand() *cobra.Command {
 	var project string
 	var baseURL string
 	var authHeader string
-	var authToken string
+	var authToken, authTokenEnv string
 	var updateURL string
 	var specType string
 	cmd := &cobra.Command{
@@ -363,9 +410,9 @@ openapi config create -p erp ./openapi.yaml --base-url https://api.example.com -
 				Source:     args[0],
 				BaseURL:    baseURL,
 				AuthHeader: authHeader,
-				AuthToken:  authToken,
-				UpdateURL:  updateURL,
-				SpecType:   specType,
+				AuthToken:  authToken, AuthTokenEnv: authTokenEnv,
+				UpdateURL: updateURL,
+				SpecType:  specType,
 			})
 			if err != nil {
 				return err
@@ -378,6 +425,8 @@ openapi config create -p erp ./openapi.yaml --base-url https://api.example.com -
 	cmd.Flags().StringVar(&baseURL, "base-url", "", "Initial baseUrl")
 	cmd.Flags().StringVar(&authHeader, "auth-header", "", "Initial authHeader")
 	cmd.Flags().StringVar(&authToken, "auth-token", "", "Initial authToken")
+	cmd.Flags().StringVar(&authTokenEnv, "auth-token-env", "", "Environment variable containing the complete credential header value")
+	cmd.MarkFlagsMutuallyExclusive("auth-token", "auth-token-env")
 	cmd.Flags().StringVar(&updateURL, "update-url", "", "Initial updateUrl; remote source still takes precedence")
 	cmd.Flags().StringVar(&specType, "spec-type", "", "Optional specType override")
 	mustMarkRequired(cmd, "project")
@@ -409,12 +458,14 @@ func readConfigValue(cfg api.Config, key string) (string, error) {
 		return cfg.BaseURL, nil
 	case "authHeader":
 		return cfg.AuthHeader, nil
+	case "authTokenEnv":
+		return cfg.AuthTokenEnv, nil
 	case "authToken":
 		return cfg.AuthToken, nil
 	case "updateUrl":
 		return cfg.UpdateURL, nil
 	default:
-		return "", fmt.Errorf("unsupported config key: %s; supported keys: baseUrl, authHeader, authToken, updateUrl", key)
+		return "", fmt.Errorf("unsupported config key: %s; supported keys: baseUrl, authHeader, authToken, authTokenEnv, updateUrl", key)
 	}
 }
 
@@ -426,10 +477,14 @@ func writeConfigValue(cfg *api.Config, key, value string) error {
 		cfg.AuthHeader = value
 	case "authToken":
 		cfg.AuthToken = value
+		cfg.AuthTokenEnv = ""
+	case "authTokenEnv":
+		cfg.AuthTokenEnv = value
+		cfg.AuthToken = ""
 	case "updateUrl":
 		cfg.UpdateURL = value
 	default:
-		return fmt.Errorf("unsupported config key: %s; supported keys: baseUrl, authHeader, authToken, updateUrl", key)
+		return fmt.Errorf("unsupported config key: %s; supported keys: baseUrl, authHeader, authToken, authTokenEnv, updateUrl", key)
 	}
 	return nil
 }
@@ -507,6 +562,7 @@ setting.json fields:
   baseUrl
   authHeader
   authToken
+  authTokenEnv
   updateUrl
   specType (optional override)
 

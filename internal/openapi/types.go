@@ -8,11 +8,12 @@ const (
 )
 
 type Config struct {
-	BaseURL    string `json:"baseUrl"`
-	AuthHeader string `json:"authHeader"`
-	AuthToken  string `json:"authToken"`
-	UpdateURL  string `json:"updateUrl,omitempty"`
-	SpecType   string `json:"specType,omitempty"`
+	BaseURL      string `json:"baseUrl"`
+	AuthHeader   string `json:"authHeader"`
+	AuthToken    string `json:"authToken"`
+	AuthTokenEnv string `json:"authTokenEnv,omitempty"`
+	UpdateURL    string `json:"updateUrl,omitempty"`
+	SpecType     string `json:"specType,omitempty"`
 }
 
 type Project struct {
