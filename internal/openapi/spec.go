@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -207,7 +208,7 @@ func normalizeParameter(param *openapi3.Parameter) Parameter {
 	typ := ""
 	enum := []string{}
 	if param.Schema != nil && param.Schema.Value != nil {
-		typ = strings.Join([]string(*param.Schema.Value.Type), ",")
+		typ = parameterType(param.Schema.Value)
 		for _, item := range param.Schema.Value.Enum {
 			enum = append(enum, fmt.Sprint(item))
 		}
@@ -222,15 +223,41 @@ func normalizeParameter(param *openapi3.Parameter) Parameter {
 	}
 }
 
-func normalizeRequestBody(body *openapi3.RequestBody) *RequestBody {
-	content := make(map[string]any)
-	for contentType, mediaType := range body.Content {
-		content[contentType] = mediaType.Schema.Value
+// A nullable parameter in OpenAPI 3.1 often declares types only on anyOf branches.
+func parameterType(schema *openapi3.Schema) string {
+	if schema.Type != nil {
+		return strings.Join(schema.Type.Slice(), ",")
 	}
+	var types []string
+	for _, branch := range schema.AnyOf {
+		if branch == nil || branch.Value == nil || branch.Value.Type == nil {
+			return ""
+		}
+		for _, typ := range branch.Value.Type.Slice() {
+			if !slices.Contains(types, typ) {
+				types = append(types, typ)
+			}
+		}
+	}
+	return strings.Join(types, ",")
+}
+
+func mediaSchemas(media openapi3.Content) map[string]any {
+	content := make(map[string]any, len(media))
+	for name, entry := range media {
+		content[name] = nil
+		if entry != nil && entry.Schema != nil {
+			content[name] = entry.Schema.Value
+		}
+	}
+	return content
+}
+
+func normalizeRequestBody(body *openapi3.RequestBody) *RequestBody {
 	return &RequestBody{
 		Required:    body.Required,
 		Description: body.Description,
-		Content:     content,
+		Content:     mediaSchemas(body.Content),
 	}
 }
 
@@ -249,14 +276,10 @@ func normalizeResponses(responses *openapi3.Responses) []Response {
 		if responseRef == nil || responseRef.Value == nil {
 			continue
 		}
-		content := make(map[string]any)
-		for contentType, mediaType := range responseRef.Value.Content {
-			content[contentType] = mediaType.Schema.Value
-		}
 		out = append(out, Response{
 			Status:      status,
 			Description: derefString(responseRef.Value.Description),
-			Content:     content,
+			Content:     mediaSchemas(responseRef.Value.Content),
 		})
 	}
 	return out
