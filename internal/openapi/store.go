@@ -16,12 +16,13 @@ import (
 var specHTTPClient = &http.Client{Timeout: 30 * time.Second}
 
 type CreateProjectOptions struct {
-	Source     string
-	BaseURL    string
-	AuthHeader string
-	AuthToken  string
-	UpdateURL  string
-	SpecType   string
+	Source       string
+	BaseURL      string
+	AuthHeader   string
+	AuthToken    string
+	AuthTokenEnv string
+	UpdateURL    string
+	SpecType     string
 }
 
 func BaseDir() (string, error) {
@@ -114,7 +115,10 @@ func WriteConfig(project string, cfg Config) (string, error) {
 		return "", fmt.Errorf("encode project config: %w", err)
 	}
 	data = append(data, '\n')
-	if err := os.WriteFile(configPath, data, 0o644); err != nil {
+	if err := os.Chmod(configPath, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("protect project config: %w", err)
+	}
+	if err := os.WriteFile(configPath, data, 0o600); err != nil {
 		return "", fmt.Errorf("write project config: %w", err)
 	}
 	return configPath, nil
@@ -162,7 +166,12 @@ func CreateProject(project string, opts CreateProjectOptions) (string, string, e
 	if opts.AuthHeader != "" {
 		cfg.AuthHeader = opts.AuthHeader
 	}
+	if opts.AuthTokenEnv != "" {
+		cfg.AuthTokenEnv = opts.AuthTokenEnv
+		cfg.AuthToken = ""
+	}
 	if opts.AuthToken != "" {
+		cfg.AuthTokenEnv = ""
 		cfg.AuthToken = opts.AuthToken
 	}
 	if opts.SpecType != "" {

@@ -660,3 +660,15 @@ erp / 用户管理 / GET /biz/user-info/page / 分页拉取用户信息
 ./openapi-cli config create --help
 ./openapi-cli call --help
 ```
+
+### Agent 调用
+
+用登录流程设置环境变量（如 `ERP_AUTH_VALUE`），其值为完整认证头值（例如含 Bearer 前缀）。项目只保存变量名，调用时解析；变量缺失会报错。旧项目仍可读取原有 authToken。配置显示、请求预览及响应会遮盖认证头、常见凭证字段和已注入的凭证值。业务响应仍可能含个人信息或其他业务数据。
+
+```bash
+openapi config create -p erp ./openapi.json --base-url https://api.example.com --auth-header Authorization --auth-token-env ERP_AUTH_VALUE
+openapi call -p erp -i '/tags/{id}' -m PATCH -q '{"id":"123"}' -d '{"color":"#409eff"}' --dry-run
+openapi call -p erp -i '/tags/{id}' -m PATCH -q '{"id":"123"}' -d '{"color":"#409eff"}' --output json --fail-with-body
+```
+
+`--dry-run` 只构建请求。`-v` 会实际发送请求，在 JSON 模式下预览写入 stderr。执行结果在 stdout 给出 ok、HTTP status、headers 和 body，空响应的 body 为 null。HTTP 非 2xx 时加 `--fail-with-body` 可同时保留响应并返回退出码 1。网络错误和请求构建错误也返回 1，JSON 的 error.kind 分别为 transport 和 input。写操作超时后先回读，以确认操作是否已生效。

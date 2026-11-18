@@ -59,7 +59,7 @@ openapi-cli doc -p erp -i /users -m POST -t swagger
 ```bash
 openapi-cli call -p erp -i /users/{id} -m GET -q '{"id":"1"}'
 openapi-cli call -p erp -i /users -m POST -d '{"name":"alice"}'
-openapi-cli call -p erp -i /biz/user-order/page -q '{"pageNum":"1","pageSize":"20"}' -v
+openapi-cli call -p erp -i /biz/user-order/page -q '{"pageNum":"1","pageSize":"20"}' --dry-run
 ```
 
 ## Decision Rules
@@ -89,14 +89,14 @@ openapi-cli call -p erp -i /biz/user-order/page -q '{"pageNum":"1","pageSize":"2
 {
   "baseUrl": "https://api.example.com",
   "authHeader": "Authorization",
-  "authToken": "Bearer xxx",
+  "authTokenEnv": "ERP_AUTH_VALUE",
   "updateUrl": "https://example.com/openapi.json",
   "specType": "openapi"
 }
 ```
 
 - `baseUrl`: required for `call`
-- `authHeader` and `authToken`: optional, but both are needed when auth is required
+- `authHeader` and `authTokenEnv` (name of the environment variable containing the complete header value): optional, but both are needed when auth is required
 - `updateUrl`: required for `config sync`
 - `specType`: usually let the CLI auto-detect it unless the user explicitly needs an override
 
@@ -148,7 +148,7 @@ Set both header name and token value.
 
 ```bash
 openapi-cli config set -p erp authHeader Authorization
-openapi-cli config set -p erp authToken 'Bearer xxx'
+openapi-cli config set -p erp authTokenEnv ERP_AUTH_VALUE
 ```
 
 ## Recommended Session Pattern
@@ -157,5 +157,5 @@ openapi-cli config set -p erp authToken 'Bearer xxx'
 openapi-cli config create -p erp ./openapi.yaml --base-url https://api.example.com
 openapi-cli search -p erp -i order
 openapi-cli doc -p erp -i /biz/user-order/page
-openapi-cli call -p erp -i /biz/user-order/page -q '{"pageNum":"1","pageSize":"20"}' -v
+openapi-cli call -p erp -i /biz/user-order/page -q '{"pageNum":"1","pageSize":"20"}' --dry-run
 ```
