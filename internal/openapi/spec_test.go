@@ -523,3 +523,49 @@ func writeProjectFixture(t *testing.T, home, project, fixtureName, configJSON st
 		t.Fatalf("write config: %v", err)
 	}
 }
+
+func TestOpenAPI31Catalog(t *testing.T) {
+	const spec = `openapi: 3.1.0
+info: {title: Catalog, version: "1"}
+paths:
+  /lookup:
+    post:
+      parameters:
+        - name: amount
+          in: query
+          schema:
+            anyOf:
+              - {$ref: '#/components/schemas/Amount'}
+              - {type: "null"}
+      requestBody:
+        content: {text/plain: {}}
+      responses:
+        '200':
+          description: OK
+          content: {text/plain: {}}
+components:
+  schemas:
+    Amount: {type: number, exclusiveMinimum: 0}
+`
+	kind, _, raw, doc, err := parseSpec([]byte(spec), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound := doc.Components.Schemas["Amount"].Value.ExclusiveMin.Value
+	if bound == nil || *bound != 0 {
+		t.Fatalf("lost numeric exclusiveMinimum: %v", bound)
+	}
+	ops, _, err := buildOperations("catalog", kind, raw, doc)
+	if err != nil || len(ops) != 1 {
+		t.Fatalf("building catalog: operations=%d err=%v", len(ops), err)
+	}
+	op := ops[0]
+	if got := op.QueryParams[0].Type; got != "number,null" {
+		t.Errorf("nullable amount type = %q", got)
+	}
+	for _, content := range []map[string]any{op.RequestBody.Content, op.Responses[0].Content} {
+		if value, ok := content["text/plain"]; !ok || value != nil {
+			t.Errorf("expected media type without a schema, got %v", content)
+		}
+	}
+}
